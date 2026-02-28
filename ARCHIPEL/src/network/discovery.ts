@@ -59,6 +59,22 @@ export class DiscoveryService extends EventEmitter {
         return Array.from(this.peers.values());
     }
 
+    public registerPeer(id: string, ip: string, tcpPort: number): void {
+        if (id === this.nodeId) return;
+
+        const isNew = !this.peers.has(id);
+        this.peers.set(id, {
+            id,
+            ip,
+            tcpPort,
+            lastSeen: Date.now()
+        });
+
+        if (isNew) {
+            this.emit('peer:new', this.peers.get(id));
+        }
+    }
+
     private startBroadcasting(): void {
         const broadcast = () => {
             const message = JSON.stringify({

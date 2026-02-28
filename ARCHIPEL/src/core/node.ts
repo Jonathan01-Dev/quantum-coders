@@ -124,13 +124,7 @@ export class ArchipelNode extends EventEmitter {
                     for (const peer of gossipedPeers) {
                         if (peer.id !== this.id && !this.getPeers().find(p => p.id === peer.id)) {
                             console.log(`\x1b[35m[GOSSIP]\x1b[0m Learned about Node \x1b[33m${peer.id.slice(0, 8)}\x1b[0m via ${peerId.slice(0, 8)}`);
-                            (this as any).discovery.peers.set(peer.id, {
-                                id: peer.id,
-                                ip: peer.ip,
-                                tcpPort: peer.tcpPort,
-                                lastSeen: Date.now()
-                            });
-                            this.emit('peer:new', { id: peer.id, ip: peer.ip, tcpPort: peer.tcpPort, lastSeen: Date.now() });
+                            this.discovery.registerPeer(peer.id, peer.ip, peer.tcpPort);
                             this.connectToPeer(peer.ip, peer.tcpPort).catch(() => { });
                         }
                     }
@@ -172,7 +166,11 @@ export class ArchipelNode extends EventEmitter {
             }
         });
 
-        this.server.on('secure_connection', async ({ peerId }) => {
+        this.server.on('secure_connection', async ({ socket, peerId, peerPort }) => {
+            // Register this peer immediately via connection-based discovery
+            const remoteIp = socket.remoteAddress?.replace('::ffff:', '') || '127.0.0.1';
+            this.discovery.registerPeer(peerId, remoteIp, peerPort);
+
             const knownPeers = this.getPeers();
             if (knownPeers.length > 0) {
                 await this.sendPacket(peerId, { type: 'GOSSIP_PEERS', peers: knownPeers }).catch(() => { });
@@ -218,8 +216,13 @@ export class ArchipelNode extends EventEmitter {
     public async connectToPeer(ip: string, port: number = CONFIG.NETWORK.DEFAULT_TCP_PORT): Promise<void> {
         console.log(`\x1b[36m[CONNECT]\x1b[0m Attempting manual connection to ${ip}:${port}...`);
         const tempClient = new TCPClient(this.identity, ip, port);
-        await tempClient.connect();
-        // Handshake happens internally in TCPClient
+        const session = await tempClient.connect();
+
+        // After successful handshake, register the peer
+        const peerId = (tempClient as any).peerId;
+        if (peerId) {
+            this.discovery.registerPeer(peerId, ip, port);
+        }
     }
 
     private async broadcast(payload: any): Promise<void> {
